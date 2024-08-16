@@ -1,0 +1,114 @@
+name: Terraform Pipeline Migration
+
+on: [push]
+
+jobs:
+  terraform-pipeline:
+    runs-on: ubuntu-latest
+    env:
+      delimiter: '----------------------------------------------------------- '
+      ncl_module_path: 'optum-enlp-terraform/aks-addons'
+      mainVersion: ${{ secrets.ENLP_MAIN_VERSION }}
+      final_Version: ${{ env.mainVersion }}.${{ github.run_number }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      Branch: ${{ github.ref_name }}
+      IsMainCluster: 'true'  # This should be set based on your use case
+      IsPlanRequired: 'true' # This should be set based on your use case
+      IsDestroy: 'false'     # This should be set based on your use case
+      EnvironmentType: 'dev' # This should be set based on your use case
+      ClusterID: 'my-cluster-id' # This should be set based on your use case
+
+    steps:
+      - name: Set Build Version
+        run: |
+          echo "Build Version: ${{ env.final_Version }}"
+
+      - name: Clean Workspace
+        run: |
+          if [ -d ".git" ]; then
+            git clean -fdx
+          else
+            echo "Skipping workspace clean."
+          fi
+
+      - name: Checkout Solution
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ env.Branch }}
+          repository: 'https://github.com/OptumInsight-Provider/optum-enlp-deployment.git'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: AKS Addons - Terraform Init
+        id: terraform-init
+        run: |
+          subscription=$(jq -r '.subscription' <<< "${{ steps.get_subscription_details.outputs.subscription }}")
+          storageaccountname=$(jq -r '.stoarge_acc_name' <<< "${{ steps.get_subscription_details.outputs.stoarge_acc_name }}")
+          az login --service-principal --username ${{ secrets.ARM_CLIENT_ID }} --password ${{ secrets.ARM_CLIENT_SECRET }} --tenant ${{ secrets.ARM_TENANT_ID }}
+          cd "${{ env.ncl_module_path }}"
+          if [ "${{ env.IsMainCluster }}" == "true" ]; then
+            terraform init -no-color -backend-config="env/${{ env.EnvironmentType }}/tfstate-backend-init.tfvars" -backend-config="access_key=${{ secrets.STORAGE_ACCESS_KEY }}" -backend-config="container_name=enlp-tf-aks-addons-${{ env.EnvironmentType }}" -backend-config="storage_account_name=${storageaccountname}"
+          else
+            terraform init -no-color -backend-config="env/${{ env.EnvironmentType }}/tfstate-backend-init.tfvars" -backend-config="access_key=${{ secrets.STORAGE_ACCESS_KEY }}" -backend-config="container_name=enlp-tf-aks-addons-cluster-${{ env.ClusterID }}-${{ env.EnvironmentType }}" -backend-config="storage_account_name=${storageaccountname}"
+          fi
+
+      - name: AKS Addons - Terraform Plan
+        if: ${{ env.IsPlanRequired == 'true' }}
+        id: terraform-plan
+        run: |
+          subscriptionId=$(jq -r '.subscription_id' <<< "${{ steps.get_subscription_details.outputs.subscription_id }}")
+          az login --service-principal --username ${{ secrets.ARM_CLIENT_ID }} --password ${{ secrets.ARM_CLIENT_SECRET }} --tenant ${{ secrets.ARM_TENANT_ID }}
+          cd "${{ env.ncl_module_path }}"
+          if [ "${{ env.IsMainCluster }}" == "true" ]; then
+            terraform plan -no-color -var-file="env/${{ env.EnvironmentType }}/variables-default.tfvars" -var="is_main_cluster=true" -var="subscription_id=${subscriptionId}" -var="splunk_access_token=${{ secrets.SPLUNK_ACCESS_TOKEN }}"
+          else
+            terraform plan -no-color -var-file="env/${{ env.EnvironmentType }}/variables-default.tfvars" -var="is_main_cluster=false" -var="cluster_id=${{ env.ClusterID }}" -var="subscription_id=${subscriptionId}" -var="splunk_access_token=${{ secrets.SPLUNK_ACCESS_TOKEN }}"
+          fi
+
+      - name: AKS Addons - Terraform Apply
+        if: ${{ env.IsDestroy == 'false' }}
+        run: |
+          subscriptionid=$(jq -r '.subscription_id' <<< "${{ steps.get_subscription_details.outputs.subscription_id }}")
+          az login --service-principal --username ${{ secrets.ARM_CLIENT_ID }} --password ${{ secrets.ARM_CLIENT_SECRET }} --tenant ${{ secrets.ARM_TENANT_ID }}
+          cd "${{ env.ncl_module_path }}"
+          if [ "${{ env.IsMainCluster }}" == "true" ]; then
+            terraform apply -no-color -auto-approve -var-file="env/${{ env.EnvironmentType }}/variables-default.tfvars" -var="is_main_cluster=true" -var="subscription_id=${subscriptionid}" -var="splunk_access_token=${{ secrets.SPLUNK_ACCESS_TOKEN }}"
+          else
+            terraform apply -no-color -auto-approve -var-file="env/${{ env.EnvironmentType }}/variables-default.tfvars" -var="is_main_cluster=false" -var="cluster_id=${{ env.ClusterID }}" -var="subscription_id=${subscriptionid}" -var="splunk_access_token=${{ secrets.SPLUNK_ACCESS_TOKEN }}"
+          fi
+
+      - name: AKS Addons - Terraform Destroy
+        if: ${{ env.IsDestroy == 'true' }}
+        run: |
+          subscriptionid=$(jq -r '.subscription_id' <<< "${{ steps.get_subscription_details.outputs.subscription_id }}")
+          az login --service-principal --username ${{ secrets.ARM_CLIENT_ID }} --password ${{ secrets.ARM_CLIENT_SECRET }} --tenant ${{ secrets.ARM_TENANT_ID }}
+          cd "${{ env.ncl_module_path }}"
+          if [ "${{ env.IsMainCluster }}" == "true" ]; then
+            terraform destroy -no-color -auto-approve -var-file="env/${{ env.EnvironmentType }}/variables-default.tfvars" -var="is_main_cluster=true" -var="subscription_id=${subscriptionid}" -var="splunk_access_token=${{ secrets.SPLUNK_ACCESS_TOKEN }}"
+          else
+            terraform destroy -no-color -auto-approve -var-file="env/${{ env.EnvironmentType }}/variables-default.tfvars" -var="is_main_cluster=false" -var="cluster_id=${{ env.ClusterID }}" -var="subscription_id=${subscriptionid}" -var="splunk_access_token=${{ secrets.SPLUNK_ACCESS_TOKEN }}"
+          fi
+
+    post:
+      always:
+        - name: Clean up workspace
+          run: |
+            rm -rf ${{ github.workspace }}
+          shell: bash
+
+      success:
+        - name: Success message
+          run: echo 'Congratulations! Pipeline successfully executed.'
+
+      failure:
+        - name: Failure message
+          run: echo 'Oops! Pipeline execution failed.'
+
+      aborted:
+        - name: Aborted message
+          run: echo 'Pipeline execution aborted.'
+
+      unstable:
+        - name: Unstable message
+          run: echo 'Pipeline execution is unstable.'
