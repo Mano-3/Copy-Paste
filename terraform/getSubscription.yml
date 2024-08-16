@@ -1,0 +1,57 @@
+name: Terraform Pipeline Migration
+
+on: [push]
+
+jobs:
+  terraform-migration:
+    runs-on: ubuntu-latest
+    env:
+      EnvironmentType: ${{ inputs.EnvironmentType }}
+      Subscription: ${{ inputs.Subscription }}
+    steps:
+      - name: Set up subscription map
+        id: set_subscriptions
+        run: |
+          echo "::set-output name=subscriptionMap::$(jq -n \
+            '{"test": "nlpaas-nonprod", "dev": "arkaas-nonprod", "qa": "arkaas-nonprod", "perf": "arkaas-prod", "stage": "nlpaas-prod", "prod": "nlpaas-prod", "dev1": "nlpaas-nonprod", "qa1": "nlpaas-nonprod", "perf1": "arkaas-prod", "stage1": "nlpaas-prod", "prod1": "nlpaas-prod", "ark": "arkaas-prod"}')"
+
+      - name: Set up storage account map
+        id: set_storage_accounts
+        run: |
+          echo "::set-output name=stoargeAccMap::$(jq -n \
+            '{"nlpaas-nonprod": "enlptfstatenlpaasnp", "arkaas-nonprod": "enlptfstatearkaasnp", "nlpaas-prod": "enlptfstatenlpaas", "arkaas-prod": "enlptfstatearkaas"}')"
+
+      - name: Set up subscription ID map
+        id: set_subscription_ids
+        run: |
+          echo "::set-output name=subscriptionIdMap::$(jq -n \
+            '{"nlpaas-nonprod": "c13d3595-ec03-436d-b30a-b21c2b16d804", "arkaas-nonprod": "a95b54af-d65e-43db-a558-7e116c319431", "nlpaas-prod": "35518787-d32f-4d45-b675-8bd976a6e850", "arkaas-prod": "e324c324-96f1-4d57-b7b1-8acaabc5ef87"}')"
+
+      - name: Set up AAD Owner Group Object ID map
+        id: set_aad_owner_group
+        run: |
+          echo "::set-output name=aadOwnerGroupObjectIdMap::$(jq -n \
+            '{"nlpaas-nonprod": "ef9a44b0-f87a-4442-b6f5-43cca12c3251", "arkaas-nonprod": "40b1f146-6afb-4c6b-8605-e6906048725b", "nlpaas-prod": "ea39ef9d-1ad4-4ae4-a438-d5a18a4375c3", "arkaas-prod": "c110fd06-c0c6-4767-96aa-3c5f9813483a"}')"
+
+      - name: Set up AAD Contributor Group Object ID map
+        id: set_aad_contributor_group
+        run: |
+          echo "::set-output name=aadContributorGroupObjectIdMap::$(jq -n \
+            '{"nlpaas-nonprod": "6b0d03a0-6d4c-405a-afce-aab508d0d049", "arkaas-nonprod": "472ea02d-a12d-4e08-9ae2-ea79407b77bd", "nlpaas-prod": "2e3a62f9-ad10-4647-9a55-77f9ac8211f1", "arkaas-prod": "cfd34da3-75be-47fc-a025-98a79bd6d399"}')"
+
+      - name: Determine Outputs
+        id: determine_outputs
+        run: |
+          if [[ "${{ env.EnvironmentType }}" == "null" && "${{ env.Subscription }}" != "null" ]]; then
+            echo "::set-output name=subscription_id::$(echo ${{ steps.set_subscription_ids.outputs.subscriptionIdMap }} | jq -r '.["${{ env.Subscription }}"]')"
+            echo "::set-output name=stoarge_acc_name::$(echo ${{ steps.set_storage_accounts.outputs.stoargeAccMap }} | jq -r '.["${{ env.Subscription }}"]')"
+            echo "::set-output name=aad_owner_obj_id::$(echo ${{ steps.set_aad_owner_group.outputs.aadOwnerGroupObjectIdMap }} | jq -r '.["${{ env.Subscription }}"]')"
+            echo "::set-output name=aad_contributor_obj_id::$(echo ${{ steps.set_aad_contributor_group.outputs.aadContributorGroupObjectIdMap }} | jq -r '.["${{ env.Subscription }}"]')"
+          else
+            subscription=$(echo ${{ steps.set_subscriptions.outputs.subscriptionMap }} | jq -r '.["${{ env.EnvironmentType }}"]')
+            echo "::set-output name=subscription::${subscription}"
+            echo "::set-output name=stoarge_acc_name::$(echo ${{ steps.set_storage_accounts.outputs.stoargeAccMap }} | jq -r '.["${subscription}"]')"
+            echo "::set-output name=subscription_id::$(echo ${{ steps.set_subscription_ids.outputs.subscriptionIdMap }} | jq -r '.["${subscription}"]')"
+            echo "::set-output name=aad_owner_obj_id::$(echo ${{ steps.set_aad_owner_group.outputs.aadOwnerGroupObjectIdMap }} | jq -r '.["${subscription}"]')"
+            echo "::set-output name=aad_contributor_obj_id::$(echo ${{ steps.set_aad_contributor_group.outputs.aadContributorGroupObjectIdMap }} | jq -r '.["${subscription}"]')"
+          fi
