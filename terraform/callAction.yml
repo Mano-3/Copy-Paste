@@ -1,0 +1,22 @@
+name: Terraform Pipeline Migration
+
+on: [push]
+
+jobs:
+  terraform-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call Get Subscription Details Workflow
+        uses: ./.github/workflows/getSubscriptionDetails.yaml
+        with:
+          EnvironmentType: ${{ github.event.inputs.EnvironmentType }}
+          Subscription: ${{ github.event.inputs.Subscription }}
+
+      - name: Use Subscription Details
+        run: |
+          echo "Subscription: ${{ env.subscription }}"
+          echo "Storage Account Name: ${{ env.stoarge_acc_name }}"
+          echo "Subscription ID: ${{ env.subscription_id }}"
+          echo "AAD Owner Object ID: ${{ env.aad_owner_obj_id }}"
+          echo "AAD Contributor Object ID: ${{ env.aad_contributor_obj_id }}"
