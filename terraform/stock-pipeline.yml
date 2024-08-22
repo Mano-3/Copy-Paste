@@ -1,0 +1,63 @@
+# .github/workflows/terraformPipeline.yaml
+
+name: Terraform Pipeline Migration
+
+on: [push]
+
+jobs:
+  terraform-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Repository
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Call Get Subscription Details Workflow
+        id: get_subscription_details
+        uses: owner/repo/.github/workflows/getSubscriptionDetails.yaml@branch
+        with:
+          EnvironmentType: ${{ github.event.inputs.EnvironmentType }}
+          Subscription: ${{ github.event.inputs.Subscription }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+      - name: Set Environment Variables
+        run: |
+          echo "SUBSCRIPTION=${{ steps.get_subscription_details.outputs.subscription }}" >> $GITHUB_ENV
+          echo "STORAGE_ACC_NAME=${{ steps.get_subscription_details.outputs.storage_acc_name }}" >> $GITHUB_ENV
+          echo "SUBSCRIPTION_ID=${{ steps.get_subscription_details.outputs.subscription_id }}" >> $GITHUB_ENV
+          echo "AAD_OWNER_OBJ_ID=${{ steps.get_subscription_details.outputs.aad_owner_obj_id }}" >> $GITHUB_ENV
+          echo "AAD_CONTRIBUTOR_OBJ_ID=${{ steps.get_subscription_details.outputs.aad_contributor_obj_id }}" >> $GITHUB_ENV
+
+      - name: Use Subscription Details
+        run: |
+          echo "Subscription: $SUBSCRIPTION"
+          echo "Storage Account Name: $STORAGE_ACC_NAME"
+          echo "Subscription ID: $SUBSCRIPTION_ID"
+          echo "AAD Owner Object ID: $AAD_OWNER_OBJ_ID"
+          echo "AAD Contributor Object ID: $AAD_CONTRIBUTOR_OBJ_ID"
+
+      - name: Terraform Init
+        run: |
+          az login --service-principal --username ${{ secrets.ARM_CLIENT_ID }} --password ${{ secrets.ARM_CLIENT_SECRET }} --tenant ${{ secrets.ARM_TENANT_ID }}
+          cd optum-enlp-terraform/aks-addons
+          terraform init -no-color -backend-config=env/${{ github.event.inputs.EnvironmentType }}/tfstate-backend-init.tfvars -backend-config="access_key=${{ secrets.STORAGE_ACCESS_KEY }}" -backend-config="container_name=enlp-tf-aks-addons-${{ github.event.inputs.EnvironmentType }}" -backend-config="storage_account_name=$STORAGE_ACC_NAME"
+
+      - name: Terraform Plan
+        run: |
+          cd optum-enlp-terraform/aks-addons
+          terraform plan -no-color -var-file=env/${{ github.event.inputs.EnvironmentType }}/variables-default.tfvars -var "subscription_id=$SUBSCRIPTION_ID" -var "aad_owner_obj_id=$AAD_OWNER_OBJ_ID" -var "aad_contributor_obj_id=$AAD_CONTRIBUTOR_OBJ_ID"
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cd optum-enlp-terraform/aks-addons
+          terraform apply -no-color -auto-approve -var-file=env/${{ github.event.inputs.EnvironmentType }}/variables-default.tfvars -var "subscription_id=$SUBSCRIPTION_ID" -var "aad_owner_obj_id=$AAD_OWNER_OBJ_ID" -var "aad_contributor_obj_id=$AAD_CONTRIBUTOR_OBJ_ID"
+
+      - name: Terraform Destroy
+        if: github.event.inputs.Action == 'destroy'
+        run: |
+          cd optum-enlp-terraform/aks-addons
+          terraform destroy -no-color -auto-approve -var-file=env/${{ github.event.inputs.EnvironmentType }}/variables-default.tfvars -var "subscription_id=$SUBSCRIPTION_ID" -var "aad_owner_obj_id=$AAD_OWNER_OBJ_ID" -var "aad_contributor_obj_id=$AAD_CONTRIBUTOR_OBJ_ID"
