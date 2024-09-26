@@ -1,0 +1,13 @@
+name: Workflow with Manual Approval via Comments
+
+on: [workflow_dispatch]
+
+jobs:
+  approval_job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Manual Approval with Comments
+        uses: ./.github/actions/manual-approval-wait
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          assignees: '["username1", "username2"]'
