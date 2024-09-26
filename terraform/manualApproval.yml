@@ -1,0 +1,55 @@
+name: 'Manual Approval with Comments'
+inputs:
+  token:
+    description: 'GitHub Token'
+    required: true
+  assignees:
+    description: 'Usernames of assignees'
+    required: true
+  issue_title:
+    description: 'Title of the issue'
+    default: 'Manual Approval Required'
+  issue_body:
+    description: 'Body of the issue'
+    default: 'Please review and comment either "approve" or "deny".'
+runs:
+  using: 'composite'
+  steps:
+    - name: Create approval issue
+      run: |
+        ISSUE_URL=$(curl -X POST \
+          -H "Authorization: token ${{ inputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}/issues \
+          -d '{
+            "title": "${{ inputs.issue_title }}",
+            "body": "${{ inputs.issue_body }}",
+            "assignees": [${{ inputs.assignees }}]
+          }' | jq -r '.url')
+        echo "Issue URL: $ISSUE_URL"
+
+    - name: Wait for Approval or Denial via Comments
+      shell: bash
+      run: |
+        ISSUE_NUMBER=$(curl -X GET \
+          -H "Authorization: token ${{ inputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}/issues?state=open | jq -r '.[0].number')
+
+        while true; do
+          COMMENTS=$(curl -X GET \
+            -H "Authorization: token ${{ inputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER/comments | jq -r '.[].body')
+
+          if [[ "$COMMENTS" =~ "approve" ]]; then
+            echo "Issue approved, proceeding with the workflow."
+            break
+          elif [[ "$COMMENTS" =~ "deny" ]]; then
+            echo "Issue denied, stopping the workflow."
+            exit 1
+          fi
+
+          echo "Waiting for approval or denial..."
+          sleep 60
+        done
