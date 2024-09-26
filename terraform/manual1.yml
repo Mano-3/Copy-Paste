@@ -38,9 +38,9 @@ runs:
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER/comments)
 
-          # Check if there are any comments and filter the correct structure
-          if echo "$COMMENTS" | jq -e 'length > 0' >/dev/null; then
-            COMMENT_BODY=$(echo "$COMMENTS" | jq -r '.[].body')
+          # Ensure COMMENTS is a valid JSON array and not an empty response
+          if echo "$COMMENTS" | jq -e '.' > /dev/null; then
+            COMMENT_BODY=$(echo "$COMMENTS" | jq -r '.[].body' || echo "")
 
             # Check for "approve" or "deny" in comments
             if [[ "$COMMENT_BODY" =~ "approve" ]]; then
@@ -51,7 +51,7 @@ runs:
               exit 1
             fi
           else
-            echo "No comments yet, waiting..."
+            echo "No valid comments yet, waiting..."
           fi
 
           sleep 60
